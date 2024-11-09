@@ -3,29 +3,59 @@ import * as tf from '@tensorflow/tfjs';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
 const DitherDetection = () => {
-  // ... [previous imports and initial setup]
+  // ... [previous basic setup]
 
-  // Define available pixel densities
   const pixelDensities = [2, 4, 8, 16, 32, 64];
-  const [densityIndex, setDensityIndex] = useState(2); // Start at 8x (index 2)
-  const currentScale = pixelDensities[densityIndex];
+  const [densityIndex, setDensityIndex] = useState(2); // Start at 8x
+  const [facingMode, setFacingMode] = useState('environment');
   
-  const touchStartRef = useRef(null);
-  const SWIPE_THRESHOLD = 30;
-  const DETECTION_COLOR = '#5a00e6';
+  // For double tap detection
+  const lastTapRef = useRef(0);
+  const touchTimeoutRef = useRef(null);
+  const DOUBLE_TAP_DELAY = 300; // milliseconds
+  
+  // For touch controls
+  const touchStartRef = useRef(0);
+  const SWIPE_THRESHOLD = 50;
 
-  const adjustPixelDensity = (direction) => {
+  const adjustDensity = (direction) => {
+    console.log('Adjusting density:', direction); // Debug log
     setDensityIndex(prevIndex => {
-      if (direction === 'up') {
-        return Math.min(prevIndex + 1, pixelDensities.length - 1);
-      } else {
-        return Math.max(prevIndex - 1, 0);
-      }
+      const newIndex = direction === 'up' 
+        ? Math.min(prevIndex + 1, pixelDensities.length - 1)
+        : Math.max(prevIndex - 1, 0);
+      console.log('New density:', pixelDensities[newIndex] + 'x'); // Debug log
+      return newIndex;
     });
   };
 
+  const handleKeyDown = (event) => {
+    console.log('Key pressed:', event.key); // Debug log
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      adjustDensity('up');
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      adjustDensity('down');
+    }
+  };
+
   const handleTouchStart = (e) => {
+    const now = Date.now();
     touchStartRef.current = e.touches[0].clientY;
+
+    if (lastTapRef.current && (now - lastTapRef.current) < DOUBLE_TAP_DELAY) {
+      // Double tap detected
+      clearTimeout(touchTimeoutRef.current);
+      flipCamera();
+      lastTapRef.current = 0;
+    } else {
+      // Potential first tap
+      lastTapRef.current = now;
+      touchTimeoutRef.current = setTimeout(() => {
+        lastTapRef.current = 0;
+      }, DOUBLE_TAP_DELAY);
+    }
   };
 
   const handleTouchMove = (e) => {
@@ -36,78 +66,68 @@ const DitherDetection = () => {
     const diff = touchStartRef.current - touchEnd;
 
     if (Math.abs(diff) >= SWIPE_THRESHOLD) {
-      adjustPixelDensity(diff > 0 ? 'up' : 'down');
+      console.log('Swipe detected:', diff > 0 ? 'up' : 'down'); // Debug log
+      adjustDensity(diff > 0 ? 'up' : 'down');
       touchStartRef.current = touchEnd;
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      adjustPixelDensity('up');
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      adjustPixelDensity('down');
+  const handleTouchEnd = () => {
+    touchStartRef.current = 0;
+  };
+
+  const flipCamera = async () => {
+    console.log('Flipping camera'); // Debug log
+    if (videoRef.current?.srcObject) {
+      const tracks = videoRef.current.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+
+      const newFacingMode = facingMode === 'environment' ? 'user' : 'environment';
+      setFacingMode(newFacingMode);
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: newFacingMode,
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        });
+        
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      } catch (err) {
+        console.error('Camera flip error:', err);
+      }
     }
   };
 
-  // Update detection drawing with thicker stroke and smaller text
-  const processFrame = async () => {
-    if (!videoRef.current || !canvasRef.current || !model) return;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const detectionCtx = detectionCanvasRef.current.getContext('2d');
-
-    try {
-      // ... [previous dithering code remains the same]
-
-      // Draw detections with updated styling
-      detectionCtx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      predictions.forEach(prediction => {
-        const [x, y, width, height] = prediction.bbox;
-        const alignedX = Math.floor(x / currentScale) * currentScale;
-        const alignedY = Math.floor(y / currentScale) * currentScale;
-        const alignedWidth = Math.floor(width / currentScale) * currentScale;
-        const alignedHeight = Math.floor(height / currentScale) * currentScale;
-
-        // Even thicker stroke (4x pixel size)
-        detectionCtx.strokeStyle = DETECTION_COLOR;
-        detectionCtx.lineWidth = currentScale * 4;
-        detectionCtx.strokeRect(alignedX, alignedY, alignedWidth, alignedHeight);
-
-        // Smaller text (now 1x pixel size)
-        const text = `${prediction.class}`;
-        detectionCtx.font = `${currentScale}px monospace`;
-        detectionCtx.fillStyle = DETECTION_COLOR;
-        detectionCtx.fillText(text, alignedX + currentScale, alignedY - currentScale);
-      });
-
-      animationRef.current = requestAnimationFrame(processFrame);
-    } catch (err) {
-      console.error('Frame processing error:', err);
-    }
-  };
-
-  // Add keyboard event listener
+  // Set up keyboard controls
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []); // Empty dependency array as handleKeyDown references state through closure
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (touchTimeoutRef.current) {
+        clearTimeout(touchTimeoutRef.current);
+      }
+    };
+  }, []);
 
-  // ... [rest of the code remains the same]
+  // Debug current pixel density
+  useEffect(() => {
+    console.log('Current pixel density:', pixelDensities[densityIndex] + 'x');
+  }, [densityIndex]);
 
   return (
     <div 
       style={styles.container}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     >
       {/* ... [video and canvas elements remain the same] */}
       <div style={styles.info}>
-        {modelLoading ? 'Loading...' : `${currentScale}x`}
+        {modelLoading ? 'Loading...' : `${pixelDensities[densityIndex]}x`}
       </div>
     </div>
   );
