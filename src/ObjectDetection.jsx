@@ -228,7 +228,7 @@ const DitherDetection = () => {
         detectionCtx.strokeRect(alignedX, alignedY, alignedWidth, alignedHeight);
 
         const text = `${prediction.class}`;
-        detectionCtx.font = `${scale * 4}px monospace`;
+        detectionCtx.font = `${scale * 2}px monospace`;
         detectionCtx.fillStyle = '#5a00e6';
         detectionCtx.fillText(text, alignedX, alignedY - scale);
       });
