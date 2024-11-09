@@ -3,131 +3,134 @@ import * as tf from '@tensorflow/tfjs';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
 const DitherDetection = () => {
-  // ... [previous basic setup]
-
-  const pixelDensities = [2, 4, 8, 16, 32, 64];
-  const [densityIndex, setDensityIndex] = useState(2); // Start at 8x
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const detectionCanvasRef = useRef(null);
+  const animationRef = useRef(null);
+  const lastTapTimeRef = useRef(0);
+  const [model, setModel] = useState(null);
   const [facingMode, setFacingMode] = useState('environment');
-  
-  // For double tap detection
-  const lastTapRef = useRef(0);
-  const touchTimeoutRef = useRef(null);
-  const DOUBLE_TAP_DELAY = 300; // milliseconds
-  
-  // For touch controls
-  const touchStartRef = useRef(0);
-  const SWIPE_THRESHOLD = 50;
 
-  const adjustDensity = (direction) => {
-    console.log('Adjusting density:', direction); // Debug log
-    setDensityIndex(prevIndex => {
-      const newIndex = direction === 'up' 
-        ? Math.min(prevIndex + 1, pixelDensities.length - 1)
-        : Math.max(prevIndex - 1, 0);
-      console.log('New density:', pixelDensities[newIndex] + 'x'); // Debug log
-      return newIndex;
-    });
-  };
+  // Simplified pixel density state
+  const densities = [2, 4, 8, 16, 32, 64];
+  const [densityIndex, setDensityIndex] = useState(2); // Start at 8x
+  const currentScale = densities[densityIndex];
 
-  const handleKeyDown = (event) => {
-    console.log('Key pressed:', event.key); // Debug log
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      adjustDensity('up');
-    } else if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      adjustDensity('down');
-    }
-  };
-
-  const handleTouchStart = (e) => {
-    const now = Date.now();
-    touchStartRef.current = e.touches[0].clientY;
-
-    if (lastTapRef.current && (now - lastTapRef.current) < DOUBLE_TAP_DELAY) {
-      // Double tap detected
-      clearTimeout(touchTimeoutRef.current);
-      flipCamera();
-      lastTapRef.current = 0;
-    } else {
-      // Potential first tap
-      lastTapRef.current = now;
-      touchTimeoutRef.current = setTimeout(() => {
-        lastTapRef.current = 0;
-      }, DOUBLE_TAP_DELAY);
-    }
-  };
-
-  const handleTouchMove = (e) => {
+  // Keyboard controls
+  const handleKeyPress = (e) => {
     e.preventDefault();
-    if (!touchStartRef.current) return;
-
-    const touchEnd = e.touches[0].clientY;
-    const diff = touchStartRef.current - touchEnd;
-
-    if (Math.abs(diff) >= SWIPE_THRESHOLD) {
-      console.log('Swipe detected:', diff > 0 ? 'up' : 'down'); // Debug log
-      adjustDensity(diff > 0 ? 'up' : 'down');
-      touchStartRef.current = touchEnd;
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      setDensityIndex(prev => Math.min(prev + 1, densities.length - 1));
+    }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      setDensityIndex(prev => Math.max(prev - 1, 0));
     }
   };
 
-  const handleTouchEnd = () => {
-    touchStartRef.current = 0;
+  // Touch controls
+  const handleTap = (e) => {
+    const currentTime = new Date().getTime();
+    const tapLength = currentTime - lastTapTimeRef.current;
+    
+    if (tapLength < 300 && tapLength > 0) {
+      flipCamera();
+    }
+    lastTapTimeRef.current = currentTime;
   };
 
   const flipCamera = async () => {
-    console.log('Flipping camera'); // Debug log
-    if (videoRef.current?.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
+    if (!videoRef.current) return;
 
-      const newFacingMode = facingMode === 'environment' ? 'user' : 'environment';
-      setFacingMode(newFacingMode);
+    const newMode = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(newMode);
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: newFacingMode,
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          }
-        });
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: newMode,
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      });
+
+      if (videoRef.current) {
+        const tracks = videoRef.current.srcObject?.getTracks();
+        tracks?.forEach(track => track.stop());
         
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
-      } catch (err) {
-        console.error('Camera flip error:', err);
       }
+    } catch (err) {
+      console.error('Camera flip failed:', err);
     }
   };
 
-  // Set up keyboard controls
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      if (touchTimeoutRef.current) {
-        clearTimeout(touchTimeoutRef.current);
-      }
-    };
-  }, []);
+  // Modified detection drawing with extra thick stroke
+  const drawDetections = (predictions, canvas, scale) => {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Debug current pixel density
+    predictions.forEach(prediction => {
+      const [x, y, width, height] = prediction.bbox;
+      
+      // Align to pixel grid
+      const alignedX = Math.floor(x / scale) * scale;
+      const alignedY = Math.floor(y / scale) * scale;
+      const alignedWidth = Math.floor(width / scale) * scale;
+      const alignedHeight = Math.floor(height / scale) * scale;
+
+      // Draw extra thick stroke
+      const strokeWidth = scale * 8; // Much thicker stroke
+      ctx.strokeStyle = '#5a00e6';
+      ctx.lineWidth = strokeWidth;
+      ctx.strokeRect(alignedX, alignedY, alignedWidth, alignedHeight);
+
+      // Draw label on the top stroke
+      const text = `${prediction.class}`;
+      ctx.font = `${scale * 1.5}px monospace`;
+      ctx.fillStyle = '#ffffff'; // White text
+      
+      // Center text on top stroke
+      const textWidth = ctx.measureText(text).width;
+      const textX = alignedX + (alignedWidth - textWidth) / 2;
+      const textY = alignedY + (strokeWidth / 2) + (scale / 2);
+      
+      ctx.fillText(text, textX, textY);
+    });
+  };
+
+  // Add keyboard and touch event listeners
   useEffect(() => {
-    console.log('Current pixel density:', pixelDensities[densityIndex] + 'x');
-  }, [densityIndex]);
+    window.addEventListener('keydown', handleKeyPress);
+    window.addEventListener('touchend', handleTap);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+      window.removeEventListener('touchend', handleTap);
+    };
+  }, [facingMode]); // Dependency needed for flipCamera closure
 
   return (
-    <div 
-      style={styles.container}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    >
-      {/* ... [video and canvas elements remain the same] */}
-      <div style={styles.info}>
-        {modelLoading ? 'Loading...' : `${pixelDensities[densityIndex]}x`}
+    <div className="fixed inset-0 bg-black overflow-hidden">
+      <video
+        ref={videoRef}
+        className="opacity-0 absolute inset-0 w-full h-full object-cover"
+        autoPlay
+        playsInline
+        muted
+      />
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full object-cover"
+      />
+      <canvas
+        ref={detectionCanvasRef}
+        className="absolute inset-0 w-full h-full object-cover"
+      />
+      
+      {/* Info overlay - always visible */}
+      <div className="fixed top-5 left-1/2 -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-full font-mono">
+        {densities[densityIndex]}x
       </div>
     </div>
   );
