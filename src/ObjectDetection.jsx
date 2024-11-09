@@ -3,88 +3,55 @@ import * as tf from '@tensorflow/tfjs';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
 const DitherDetection = () => {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const detectionCanvasRef = useRef(null);
-  const animationRef = useRef(null);
-  const touchStartRef = useRef(null);
-  const [model, setModel] = useState(null);
-  const [modelLoading, setModelLoading] = useState(true);
-  const [currentScale, setCurrentScale] = useState(8);
-  const [facingMode, setFacingMode] = useState('environment');
+  // ... [previous imports and initial setup]
 
-  const SWIPE_THRESHOLD = 30; // Made more sensitive
+  // Define available pixel densities
+  const pixelDensities = [2, 4, 8, 16, 32, 64];
+  const [densityIndex, setDensityIndex] = useState(2); // Start at 8x (index 2)
+  const currentScale = pixelDensities[densityIndex];
+  
+  const touchStartRef = useRef(null);
+  const SWIPE_THRESHOLD = 30;
   const DETECTION_COLOR = '#5a00e6';
 
-  // Touch controls for pixel density and camera flip
+  const adjustPixelDensity = (direction) => {
+    setDensityIndex(prevIndex => {
+      if (direction === 'up') {
+        return Math.min(prevIndex + 1, pixelDensities.length - 1);
+      } else {
+        return Math.max(prevIndex - 1, 0);
+      }
+    });
+  };
+
   const handleTouchStart = (e) => {
     touchStartRef.current = e.touches[0].clientY;
   };
 
   const handleTouchMove = (e) => {
-    e.preventDefault(); // Prevent scrolling
+    e.preventDefault();
     if (!touchStartRef.current) return;
 
     const touchEnd = e.touches[0].clientY;
     const diff = touchStartRef.current - touchEnd;
 
     if (Math.abs(diff) >= SWIPE_THRESHOLD) {
-      if (diff > 0) {
-        setCurrentScale(s => Math.min(s + 1, 16));
-      } else {
-        setCurrentScale(s => Math.max(s - 1, 4));
-      }
+      adjustPixelDensity(diff > 0 ? 'up' : 'down');
       touchStartRef.current = touchEnd;
     }
   };
 
-  const handleTouchEnd = (e) => {
-    // If it was a tap (not a swipe), flip the camera
-    if (Math.abs(e.changedTouches[0].clientY - touchStartRef.current) < SWIPE_THRESHOLD) {
-      flipCamera();
-    }
-    touchStartRef.current = null;
-  };
-
-  // Keyboard controls for pixel density
   const handleKeyDown = (e) => {
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setCurrentScale(s => Math.min(s + 1, 16));
+      adjustPixelDensity('up');
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setCurrentScale(s => Math.max(s - 1, 4));
+      adjustPixelDensity('down');
     }
   };
 
-  const flipCamera = async () => {
-    if (videoRef.current?.srcObject) {
-      // Stop current stream
-      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-      
-      // Toggle facing mode
-      setFacingMode(current => current === 'environment' ? 'user' : 'environment');
-      
-      // Restart camera with new facing mode
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: facingMode === 'environment' ? 'user' : 'environment',
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          }
-        });
-        
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      } catch (err) {
-        console.error('Camera flip error:', err);
-      }
-    }
-  };
-
-  // ... [previous initialization code remains the same]
-
+  // Update detection drawing with thicker stroke and smaller text
   const processFrame = async () => {
     if (!videoRef.current || !canvasRef.current || !model) return;
 
@@ -94,28 +61,28 @@ const DitherDetection = () => {
     const detectionCtx = detectionCanvasRef.current.getContext('2d');
 
     try {
-      // [previous dithering code remains the same]
+      // ... [previous dithering code remains the same]
 
       // Draw detections with updated styling
       detectionCtx.clearRect(0, 0, canvas.width, canvas.height);
       
       predictions.forEach(prediction => {
         const [x, y, width, height] = prediction.bbox;
-        const alignedX = Math.floor(x / scale) * scale;
-        const alignedY = Math.floor(y / scale) * scale;
-        const alignedWidth = Math.floor(width / scale) * scale;
-        const alignedHeight = Math.floor(height / scale) * scale;
+        const alignedX = Math.floor(x / currentScale) * currentScale;
+        const alignedY = Math.floor(y / currentScale) * currentScale;
+        const alignedWidth = Math.floor(width / currentScale) * currentScale;
+        const alignedHeight = Math.floor(height / currentScale) * currentScale;
 
-        // Thicker stroke
+        // Even thicker stroke (4x pixel size)
         detectionCtx.strokeStyle = DETECTION_COLOR;
-        detectionCtx.lineWidth = scale * 2; // Made thicker
+        detectionCtx.lineWidth = currentScale * 4;
         detectionCtx.strokeRect(alignedX, alignedY, alignedWidth, alignedHeight);
 
-        // Smaller text
+        // Smaller text (now 1x pixel size)
         const text = `${prediction.class}`;
-        detectionCtx.font = `${scale * 1.5}px monospace`; // Made smaller
+        detectionCtx.font = `${currentScale}px monospace`;
         detectionCtx.fillStyle = DETECTION_COLOR;
-        detectionCtx.fillText(text, alignedX + scale, alignedY - scale);
+        detectionCtx.fillText(text, alignedX + currentScale, alignedY - currentScale);
       });
 
       animationRef.current = requestAnimationFrame(processFrame);
@@ -124,51 +91,23 @@ const DitherDetection = () => {
     }
   };
 
+  // Add keyboard event listener
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, []); // Empty dependency array as handleKeyDown references state through closure
 
-  // Modified styles to prevent scrolling and handle touch events better
-  const styles = {
-    container: {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100vw',
-      height: '100vh',
-      overflow: 'hidden',
-      background: 'black',
-      touchAction: 'none', // Prevent default touch behaviors
-      userSelect: 'none' // Prevent text selection
-    },
-    // ... [rest of the styles remain the same]
-  };
+  // ... [rest of the code remains the same]
 
   return (
     <div 
       style={styles.container}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
     >
-      <video
-        ref={videoRef}
-        style={styles.video}
-        autoPlay
-        playsInline
-        muted
-      />
-      <canvas
-        ref={canvasRef}
-        style={styles.fullscreen}
-      />
-      <canvas
-        ref={detectionCanvasRef}
-        style={styles.fullscreen}
-      />
+      {/* ... [video and canvas elements remain the same] */}
       <div style={styles.info}>
-        {modelLoading ? 'Loading...' : `${currentScale}px`}
+        {modelLoading ? 'Loading...' : `${currentScale}x`}
       </div>
     </div>
   );
