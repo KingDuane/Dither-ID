@@ -18,5 +18,5 @@
    @@@@@@@@@@@@@@@            @@@@@@@@@@@@@@@@@@@@    @@@        @@@@@@@@@@     
       @@@@@@@@                @@@@@@@@@@@@@@@@@@@@               @@@@@@@@@@     
 ```
-# Dither-Object
+# Dither-ID
 Realtime Camera Dithering and Object Detection
