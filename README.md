@@ -20,3 +20,5 @@
 ```
 # Dither-ID
 Realtime Camera Dithering and Object Detection
+
+![My Image](/src/social-card-obj.png)
