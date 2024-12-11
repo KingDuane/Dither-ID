@@ -156,8 +156,8 @@ function updateLoadingProgress(progress) {
 
 async function loadDependencies() {
     try {
-        // Load TensorFlow.js
-        updateLoadingProgress(20);
+        // Load TensorFlow.js (relatively quick)
+        updateLoadingProgress(10);
         await new Promise((resolve) => {
             const script = document.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs';
@@ -165,8 +165,8 @@ async function loadDependencies() {
             document.head.appendChild(script);
         });
 
-        // Load COCO-SSD
-        updateLoadingProgress(40);
+        // Load COCO-SSD library (also quick)
+        updateLoadingProgress(20);
         await new Promise((resolve) => {
             const script = document.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd';
@@ -174,11 +174,19 @@ async function loadDependencies() {
             document.head.appendChild(script);
         });
 
-        // Load the model
-        updateLoadingProgress(60);
-        modelPromise = cocoSsd.load();
+        // Model loading (the slow part - let's show incremental progress)
+        updateLoadingProgress(30);
+        modelPromise = cocoSsd.load({
+            onProgress: (fraction) => {
+                // fraction will be between 0 and 1
+                // We want to go from 30% to 90% during model load
+                const progress = 30 + (fraction * 60);
+                updateLoadingProgress(progress);
+            }
+        });
         model = await modelPromise;
         
+        // Final initialization
         updateLoadingProgress(100);
         return model;
     } catch (error) {
