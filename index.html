@@ -20,10 +20,6 @@
     <meta name="twitter:title" content="Realtime Camera Dithering and Object Detection" />
     <meta name="twitter:description" content="Realtime Camera Dithering and Object Detection" />
     <meta name="twitter:image" content="/src/social-card-obj.png" /> 
-    
-    <!-- Add TensorFlow.js and COCO-SSD -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
     <style>
         body, html {
@@ -83,6 +79,21 @@
             margin: 10px 0;
             font-size: 14px;
         }
+        .loading-bar-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: #333;
+            z-index: 1000;
+        }
+        .loading-bar {
+            height: 100%;
+            width: 0%;
+            background: #5a00e6;
+            transition: width 0.3s ease-out;
+        }
     </style>
 </head>
 <body>
@@ -115,6 +126,61 @@ let currentAlgorithmIndex = 5;
 let currentScale = 16;
 let lastKeyPressTime = 0;
 let colorMode = 'bw'; // 'bw' or 'rgb'
+let modelPromise = null;
+
+// Loading state management
+let loadingProgress = 0;
+const loadingBar = document.createElement('div');
+loadingBar.className = 'loading-bar';
+const loadingContainer = document.createElement('div');
+loadingContainer.className = 'loading-bar-container';
+loadingContainer.appendChild(loadingBar);
+document.body.appendChild(loadingContainer);
+
+function updateLoadingProgress(progress) {
+    loadingProgress = progress;
+    loadingBar.style.width = `${progress}%`;
+    
+    if (progress === 100) {
+        setTimeout(() => {
+            loadingContainer.style.opacity = '0';
+            setTimeout(() => loadingContainer.remove(), 300);
+        }, 500);
+    }
+}
+
+async function loadDependencies() {
+    try {
+        // Load TensorFlow.js
+        updateLoadingProgress(20);
+        await new Promise((resolve) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs';
+            script.onload = resolve;
+            document.head.appendChild(script);
+        });
+
+        // Load COCO-SSD
+        updateLoadingProgress(40);
+        await new Promise((resolve) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd';
+            script.onload = resolve;
+            document.head.appendChild(script);
+        });
+
+        // Load the model
+        updateLoadingProgress(60);
+        modelPromise = cocoSsd.load();
+        model = await modelPromise;
+        
+        updateLoadingProgress(100);
+        return model;
+    } catch (error) {
+        console.error('Error loading dependencies:', error);
+        throw error;
+    }
+}
 
 const validScales = [4, 8, 16, 32, 64];
 
@@ -255,10 +321,8 @@ function applyErrorDiffusion(data, width, height, weights) {
 
 async function initCamera() {
     try {
-        // Load COCO-SSD model
-        console.log('Loading detection model...');
-        model = await cocoSsd.load();
-        console.log('Model loaded successfully');
+        // Load dependencies first
+        await loadDependencies();
 
         // Initialize camera
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -329,58 +393,56 @@ async function processFrame() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
 
-if (model) {
-    try {
-        const CONFIDENCE_THRESHOLD = 0.50; // 50% confidence threshold
-        const predictions = await model.detect(video);
-        detectionCtx.clearRect(0, 0, detectionCanvas.width, detectionCanvas.height);
-        
-        // Calculate scale factors between video dimensions and canvas
-        const scaleX = canvas.width / video.videoWidth;
-        const scaleY = canvas.height / video.videoHeight;
-        
-        // Filter predictions by confidence threshold
-        predictions
-            .filter(prediction => prediction.score >= CONFIDENCE_THRESHOLD)
-            .forEach(prediction => {
-                const [x, y, width, height] = prediction.bbox;
-                
-                // Scale coordinates to match canvas size
-                const scaledX = x * scaleX;
-                const scaledY = y * scaleY;
-                const scaledWidth = width * scaleX;
-                const scaledHeight = height * scaleY;
-                
-                // Align to pixel grid
-                const alignedX = Math.floor(scaledX / scale) * scale;
-                const alignedY = Math.floor(scaledY / scale) * scale;
-                const alignedWidth = Math.floor(scaledWidth / scale) * scale;
-                const alignedHeight = Math.floor(scaledHeight / scale) * scale;
-                
-                // Rest of your detection drawing code...
-                const strokeWidth = 32;
-                detectionCtx.strokeStyle = '#5a00e6';
-                detectionCtx.lineWidth = strokeWidth;
-                detectionCtx.strokeRect(alignedX, alignedY, alignedWidth, alignedHeight);
-                
-                // Update label position with scaled coordinates
-                const percentage = Math.round(prediction.score * 100);
-                const text = `${prediction.class} ${percentage}%`;
-                detectionCtx.font = '16px sans-serif';
-                const textWidth = detectionCtx.measureText(text).width;
-                const padding = 0;
-                const textBgWidth = textWidth + (padding * 2);
-                const textBgHeight = -4;
-                const textX = alignedX;
-                const textY = alignedY - textBgHeight - 0;
-                
-                detectionCtx.fillStyle = '#ffffff';
-                detectionCtx.fillText(text, textX + padding, textY + 0);
-            });
-    } catch (err) {
-        console.error('Detection error:', err);
+    if (model) {
+        try {
+            const predictions = await model.detect(video);
+            detectionCtx.clearRect(0, 0, detectionCanvas.width, detectionCanvas.height);
+            
+            // Calculate scale factors between video dimensions and canvas
+            const scaleX = canvas.width / video.videoWidth;
+            const scaleY = canvas.height / video.videoHeight;
+            
+            // Filter predictions by confidence threshold
+            predictions
+                .filter(prediction => prediction.score >= CONFIDENCE_THRESHOLD)
+                .forEach(prediction => {
+                    const [x, y, width, height] = prediction.bbox;
+                    
+            // Scale coordinates to match canvas size
+                    const scaledX = x * scaleX;
+                    const scaledY = y * scaleY;
+                    const scaledWidth = width * scaleX;
+                    const scaledHeight = height * scaleY;
+                    
+                    // Align to pixel grid
+                    const alignedX = Math.floor(scaledX / scale) * scale;
+                    const alignedY = Math.floor(scaledY / scale) * scale;
+                    const alignedWidth = Math.floor(scaledWidth / scale) * scale;
+                    const alignedHeight = Math.floor(scaledHeight / scale) * scale;
+                    
+                    const strokeWidth = 32;
+                    detectionCtx.strokeStyle = '#5a00e6';
+                    detectionCtx.lineWidth = strokeWidth;
+                    detectionCtx.strokeRect(alignedX, alignedY, alignedWidth, alignedHeight);
+                    
+                    // Update label position with scaled coordinates
+                    const percentage = Math.round(prediction.score * 100);
+                    const text = `${prediction.class} ${percentage}%`;
+                    detectionCtx.font = '16px sans-serif';
+                    const textWidth = detectionCtx.measureText(text).width;
+                    const padding = 0;
+                    const textBgWidth = textWidth + (padding * 2);
+                    const textBgHeight = -4;
+                    const textX = alignedX;
+                    const textY = alignedY - textBgHeight - 0;
+                    
+                    detectionCtx.fillStyle = '#ffffff';
+                    detectionCtx.fillText(text, textX + padding, textY + 0);
+                });
+        } catch (err) {
+            console.error('Detection error:', err);
+        }
     }
-}
     
     animationId = requestAnimationFrame(processFrame);
 }
@@ -405,7 +467,7 @@ function showInfo() {
 
 let infoTimeout;
 
-// Your existing event listeners with modified scale adjustment
+// Event listeners
 canvas.addEventListener('touchstart', (e) => {
     touchStartX = e.touches[0].clientX;
     touchStartY = e.touches[0].clientY;
