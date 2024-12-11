@@ -156,7 +156,7 @@ function updateLoadingProgress(progress) {
 
 async function loadDependencies() {
     try {
-        // Load TensorFlow.js (relatively quick)
+        // Load TensorFlow.js
         updateLoadingProgress(10);
         await new Promise((resolve) => {
             const script = document.createElement('script');
@@ -165,7 +165,7 @@ async function loadDependencies() {
             document.head.appendChild(script);
         });
 
-        // Load COCO-SSD library (also quick)
+        // Load COCO-SSD
         updateLoadingProgress(20);
         await new Promise((resolve) => {
             const script = document.createElement('script');
@@ -174,19 +174,22 @@ async function loadDependencies() {
             document.head.appendChild(script);
         });
 
-        // Model loading (the slow part - let's show incremental progress)
+        // Start "fake" progress animation during model load
         updateLoadingProgress(30);
-        modelPromise = cocoSsd.load({
-            onProgress: (fraction) => {
-                // fraction will be between 0 and 1
-                // We want to go from 30% to 90% during model load
-                const progress = 30 + (fraction * 60);
-                updateLoadingProgress(progress);
+        let fakeProgress = 30;
+        const progressInterval = setInterval(() => {
+            if (fakeProgress < 85) {
+                fakeProgress += 0.5;
+                updateLoadingProgress(fakeProgress);
             }
-        });
+        }, 100);
+
+        // Actually load the model
+        modelPromise = cocoSsd.load();
         model = await modelPromise;
         
-        // Final initialization
+        // Clean up and complete
+        clearInterval(progressInterval);
         updateLoadingProgress(100);
         return model;
     } catch (error) {
@@ -194,7 +197,7 @@ async function loadDependencies() {
         throw error;
     }
 }
-
+    
 const validScales = [4, 8, 16, 32, 64];
 
 // Your existing algorithms and matrices
